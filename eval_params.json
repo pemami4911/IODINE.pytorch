@@ -1,0 +1,25 @@
+{
+    "Net": {
+      "K": 4,
+      "inference_iters": 5,
+      "z_size": 64,
+      "input_size": [
+          3, 64, 64
+      ]
+    },
+    "dataset": {
+      "data_path": "",
+      "h5_path": "clevr6_todo.h5",
+      "masks": false,
+      "preprocess_": "basic"
+    },
+    "seed": 1,
+    "test": {
+      "batch_size": 32,
+      "checkpoint": "",
+      "checkpoint_dir": "",
+      "mode": "val",
+      "num_workers": 8,
+      "experiment_name": "IODINE-ARI"
+    }
+  }
