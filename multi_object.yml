@@ -206,4 +206,3 @@ dependencies:
     - tensorboard-plugin-wit==1.7.0
     - urllib3==1.25.7
     - werkzeug==1.0.1
-prefix: /home/patrick/.conda/envs/multi-object
