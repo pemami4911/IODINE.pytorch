@@ -62,12 +62,12 @@ def std_mvn(shape, device):
             torch.distributions.normal.Normal(loc, scale), 1)
 
 
-def gmm_loglikelihood(x_t, x_loc, log_var, mask_logprobs):
+def gmm_loglikelihood(x, x_loc, log_var, mask_logprobs):
     """
     mask_logprobs: [N, K, 1, H, W]
     """
     # NLL [batch_size, 1, H, W]
-    sq_err = (x_t.unsqueeze(1) - x_loc).pow(2)
+    sq_err = (x.unsqueeze(1) - x_loc).pow(2)
     # log N(x; x_loc, log_var): [N, K, C, H, W]
     normal_ll = -0.5 * log_var - 0.5 * (sq_err / torch.exp(log_var))
     # [N, K, C, H, W]

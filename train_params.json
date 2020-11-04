@@ -4,14 +4,14 @@
       "inference_iters": 5,
       "z_size": 64,
       "input_size": [
-          3, 64, 64
+          3, 96, 96
       ]
     },
     "dataset": {
       "data_path": "",
-      "h5_path": "clevr6_todo.h5",
+      "h5_path": "clevr6_with_masks_train.h5",
       "masks": false,
-      "preprocess_": "basic"
+      "preprocess_style": "clevr-small"
     },
     "seed": 1,
     "training": {
@@ -22,10 +22,8 @@
       "load_from_checkpoint": false,
       "lr": 0.0003,
       "num_workers": 8,
+      "out_dir": "",
       "tensorboard_delete_prev": false,
-      "tensorboard_freq": 100,
-      "val_batch_size": 8,
-      "val_freq": 25000,
-      "val_rollouts": 64
+      "tensorboard_freq": 100
     }
   }

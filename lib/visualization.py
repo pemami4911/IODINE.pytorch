@@ -11,9 +11,10 @@ def visualize_slots(writer, batch_data, model_outs, step):
         batch_size, C, H, W = batch_data.shape
         imgs = batch_data[0]
         
-        mask_iter_grid = torchvision.utils.make_grid(model_outs[f'masks'][0].exp())
-        mean_iter_grid = torchvision.utils.make_grid(model_outs[f'x_means'][0])
-        recon_grid = torch.sum(model_outs[f'masks'][0].exp() * model_outs[f'x_means'][0], 0)
+        # just show the last iteration, but this can be modified
+        mask_iter_grid = torchvision.utils.make_grid(model_outs['masks'][-1][0].exp())
+        mean_iter_grid = torchvision.utils.make_grid(model_outs['x_means'][-1][0])
+        recon_grid = torch.sum(model_outs[f'masks'][-1][0].exp() * model_outs['x_means'][-1][0], 0)
 
         writer.add_image(f'RGB', mean_iter_grid, step)
         writer.add_image(f'masks', mask_iter_grid, step)

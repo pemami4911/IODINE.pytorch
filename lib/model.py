@@ -78,7 +78,7 @@ class SpatialBroadcastDecoder(nn.Module):
     modify it (e.g., uses 3x3 conv instead of 5x5).
     """
     @net.capture
-    def __init__(self, input_size, z_size):
+    def __init__(self, input_size, z_size, conv_channels):
         super(SpatialBroadcastDecoder, self).__init__()
         self.h, self.w = input_size[1], input_size[2]
         self.decode = nn.Sequential(
@@ -134,7 +134,7 @@ class IODINE(nn.Module):
         self.gmm_log_scale = log_scale * torch.ones(K)
         self.gmm_log_scale = self.gmm_log_scale.view(1, K, 1, 1, 1)
 
-        self.image_decoder = SpatialBroadcastDecoder(output_size=input_size[0]+1)
+        self.image_decoder = SpatialBroadcastDecoder()
         self.refine_net = RefinementNetwork()
 
         init_weights(self.image_decoder, 'xavier')
@@ -253,7 +253,7 @@ class IODINE(nn.Module):
 
             # NLL [batch_size, 1, H, W]
             log_var = (2 * self.gmm_log_scale).to(x.device)
-            nll, ll_outs = gmm_loglikelihood(x_, x_loc, log_var, mask_logprobs)
+            nll, ll_outs = gmm_loglikelihood(x, x_loc, log_var, mask_logprobs)
 
             # KL div
             kl_div = torch.distributions.kl.kl_divergence(q_z, p_z)
@@ -265,7 +265,7 @@ class IODINE(nn.Module):
             total_loss += scaled_loss
 
             x_means += [x_loc]
-            masks += [mask_logprobs.exp()]
+            masks += [mask_logprobs]
 
             # Refinement
             if i == self.inference_iters-1:
@@ -273,14 +273,14 @@ class IODINE(nn.Module):
                 continue
 
             # compute refine inputs
-            x_ = x_.repeat(self.K, 1, 1, 1).view(self.batch_size, self.K, C, H, W)
+            x_ = x.repeat(self.K, 1, 1, 1).view(self.batch_size, self.K, C, H, W)
 
             img_inps, vec_inps = IODINE.refinenet_inputs(x_, x_loc, mask_logprobs,
                     mask_logits, ll_outs['log_p_k'], ll_outs['normal_ll'], lamda, loss, self.layer_norms, not self.training)
 
             delta, (h,c) = self.refine_net(img_inps, vec_inps, h, c)
             lamda = lamda + delta
-
+        
         return {
             'total_loss': total_loss,
             'nll': torch.mean(nll),
