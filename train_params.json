@@ -1,6 +1,6 @@
 {
     "Net": {
-      "K": 4,
+      "K": 7,
       "inference_iters": 5,
       "z_size": 64,
       "input_size": [
