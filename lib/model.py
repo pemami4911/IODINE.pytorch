@@ -16,10 +16,11 @@ def cfg():
     K = 4
     inference_iters = 4
     log_scale = math.log(0.10)  # log base e
-    refinenet_channels_in = 17
+    refinenet_channels_in = 16
     lstm_dim = 128
     conv_channels = 32
     kl_beta = 1
+    geco_warm_start = 1000
 
 
 class RefinementNetwork(nn.Module):
@@ -122,7 +123,7 @@ class SpatialBroadcastDecoder(nn.Module):
 
 class IODINE(nn.Module):
     @net.capture
-    def __init__(self, z_size, input_size, K, inference_iters, batch_size, log_scale, kl_beta, lstm_dim):
+    def __init__(self, z_size, input_size, K, inference_iters, batch_size, log_scale, kl_beta, lstm_dim, geco_warm_start):
         super(IODINE, self).__init__()
 
         self.z_size = z_size
@@ -133,6 +134,7 @@ class IODINE(nn.Module):
         self.kl_beta = kl_beta
         self.gmm_log_scale = log_scale * torch.ones(K)
         self.gmm_log_scale = self.gmm_log_scale.view(1, K, 1, 1, 1)
+        self.geco_warm_start = geco_warm_start
 
         self.image_decoder = SpatialBroadcastDecoder()
         self.refine_net = RefinementNetwork()
@@ -157,6 +159,8 @@ class IODINE(nn.Module):
 
         self.h_0, self.c_0 = (torch.zeros(1, self.batch_size*self.K, lstm_dim),
                     torch.zeros(1, self.batch_size*self.K, lstm_dim))
+        self.geco_C_ema = nn.Parameter(torch.tensor(0.), requires_grad=False)
+        self.geco_beta = nn.Parameter(torch.tensor(0.55), requires_grad=False)
 
 
     @staticmethod
@@ -169,14 +173,14 @@ class IODINE(nn.Module):
         # 4. mask logits [N, K, 1, H, W]
         # 5. mask posterior [N, K, 1, H, W]
         normal_ll = torch.sum(normal_ll, dim=2)
-        mask_posterior = (normal_ll - torch.logsumexp(normal_ll, dim=1).unsqueeze(1)).unsqueeze(2).exp() # not logscale
+        mask_posterior = (normal_ll - torch.logsumexp(normal_ll, dim=1).unsqueeze(1)).unsqueeze(2) # logscale
         # 6. pixelwise likelihood [N, K, 1, H, W]
-        log_p_k = torch.logsumexp(log_p_k, dim=1)
-        log_p_k = torch.sum(log_p_k, dim=1)
+        log_p_k = torch.logsumexp(log_p_k, dim=[1,2])
         log_p_k = log_p_k.view(-1, 1, 1, H, W).repeat(1, K, 1, 1, 1)
-        px_l = log_p_k.exp() # not log scale
+        px_l = log_p_k  # log scale
+        #px_l = log_p_k.exp() # not log scale
         # 7. LOO likelihood
-        loo_px_l = px_l - (masks.exp() * normal_ll.unsqueeze(2).exp()) # [N,K,1,H,W]
+        #loo_px_l = torch.log(1e-6 + (px_l.exp()+1e-6 - (masks + normal_ll.unsqueeze(2).exp())+1e-6)) # [N,K,1,H,W]
 
         # 8. Coordinate channels
         x = torch.linspace(-1, 1, W, device='cuda')
@@ -201,7 +205,7 @@ class IODINE(nn.Module):
 
         # apply layernorms
         px_l = layer_norms[0](px_l).detach()
-        loo_px_l = layer_norms[1](loo_px_l).detach()
+        #loo_px_l = layer_norms[1](loo_px_l).detach()
         d_means = layer_norms[2](d_means).detach()
         d_masks = layer_norms[3](d_masks).detach()
         d_loc_z = layer_norms[4](d_loc_z).detach()
@@ -209,7 +213,7 @@ class IODINE(nn.Module):
 
         # concat image-size and vector inputs
         image_inputs = torch.cat([
-            image, means, masks.exp(), mask_logits, mask_posterior, px_l, loo_px_l,
+            image, means, masks, mask_logits, mask_posterior, px_l,
             d_means, d_masks, x_mesh, y_mesh], 2)
         vec_inputs = torch.cat([
             lamda, d_loc_z, d_sp_z], 1)
@@ -217,7 +221,7 @@ class IODINE(nn.Module):
         return image_inputs.view(N * K, -1, H, W), vec_inputs
 
 
-    def forward(self, x):
+    def forward(self, x, geco, step):
         """
         Evaluates the model as a whole, encodes and decodes
         and runs inference for T steps
@@ -258,8 +262,12 @@ class IODINE(nn.Module):
             # KL div
             kl_div = torch.distributions.kl.kl_divergence(q_z, p_z)
             kl_div = kl_div.view(self.batch_size, self.K).sum(1)
-            loss = nll + self.kl_beta * kl_div
-            loss = torch.mean(loss)
+            #loss = nll + self.kl_beta * kl_div
+            #loss = torch.mean(loss)
+            if self.kl_beta == 0. or self.geco_warm_start > step or geco is None:
+                loss = torch.mean(nll + self.kl_beta * kl_div)
+            else:
+                loss = self.kl_beta * torch.mean(kl_div) - geco.constraint(self.geco_C_ema, self.geco_beta, torch.mean(nll))
             scaled_loss = ((i+1.)/self.inference_iters) * loss
             losses += [scaled_loss]
             total_loss += scaled_loss

@@ -5,7 +5,8 @@
       "z_size": 64,
       "input_size": [
           3, 96, 96
-      ]
+      ],
+      "geco_warm_start": 1000
     },
     "dataset": {
       "data_path": "",
@@ -20,7 +21,12 @@
       "checkpoint_freq": 25000,
       "iters": 500000,
       "load_from_checkpoint": false,
-      "lr": 0.0003,
+      "lr": 0.0004,
+      "use_scheduler": true,
+      "use_geco": false,
+      "geco_reconstruction_target": -62500,
+      "geco_ema_alpha": 0.99,
+      "geco_beta_stepsize": 1e-6,
       "num_workers": 8,
       "out_dir": "",
       "tensorboard_delete_prev": false,

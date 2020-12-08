@@ -6,10 +6,13 @@ from torch.utils.data.distributed import DistributedSampler
 
 from sacred import Experiment, cli_option
 
+from warmup_scheduler import GradualWarmupScheduler
+
 from lib.datasets import ds
 from lib.datasets import StaticHdF5Dataset
 from lib.model import net
 from lib.model import IODINE
+from lib.geco import GECO
 from lib.visualization import visualize_slots
 
 from tqdm import tqdm
@@ -30,6 +33,14 @@ def cfg():
             'num_workers': 8,  # pytorch dataloader workers
             'iters': 500000,  # train steps if no curriculum
             'lr': 3e-4,  # Adam LR
+            'warmup': 10000,
+            'decay_rate': 0.5,
+            'decay_steps': 100000,   
+            'use_scheduler': True,         
+            'use_geco': True,
+            'geco_reconstruction_target': -23000,  # GECO C
+            'geco_ema_alpha': 0.99,  # GECO EMA step parameter,
+            'geco_beta_stepsize': 1e-6,  # GECO Lagrange parameter beta
             'mode': 'train',
             'tensorboard_freq': 100,  # how often to write to TB
             'tensorboard_delete_prev': False,  # delete TB dir if already exists
@@ -81,12 +92,22 @@ def run(training, seed, _run):
 
     model = IODINE(batch_size=training['batch_size'])
 
+    if training['use_geco']:
+        model_geco = GECO(training['geco_reconstruction_target'], training['geco_ema_alpha'])
+    else:
+        model_geco = None
+
     model = model.to(local_rank)
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], output_device=local_rank)
     model.train()
 
     # Optimization
     model_opt = torch.optim.Adam(model.parameters(), lr=training['lr'])
+    if training['use_scheduler']:
+        scheduler = torch.optim.lr_scheduler.LambdaLR(model_opt, lr_lambda=lambda epoch: 0.5 ** (epoch / 100000))
+        scheduler_warmup = GradualWarmupScheduler(model_opt, multiplier=1, total_epoch=training['warmup'], after_scheduler=scheduler)
+    else:
+        scheduler_warmup = None
 
     if not training['load_from_checkpoint']:    
         step = 0 
@@ -120,25 +141,39 @@ def run(training, seed, _run):
             img_batch = batch['imgs'].to(local_rank)
             model_opt.zero_grad()
 
-            out_dict = model(img_batch)
+            out_dict = model(img_batch, model_geco, step)
     
             total_loss = out_dict['total_loss']
             kl = out_dict['kl']
             nll = out_dict['nll']
             
             total_loss.backward()
+            
+            if training['use_scheduler']:
+                scheduler_warmup.step(step)
+
             # clip gradient norm to 5
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.)
 
             model_opt.step()
-                        
+
+            if training['use_geco'] and model.module.kl_beta > 0.:
+                if step == model.module.geco_warm_start:
+                    model.module.geco_C_ema = model_geco.init_ema(model.module.geco_C_ema, nll)
+                elif step > model.module.geco_warm_start:
+                    model.module.geco_C_ema = model_geco.update_ema(model.module.geco_C_ema, nll)
+                    model.module.geco_beta = model_geco.step_beta(model.module.geco_C_ema,
+                            model.module.geco_beta, training['geco_beta_stepsize'])
+
             # logging
             if step % training['tensorboard_freq'] == 0 and local_rank == 'cuda:0':
                 writer.add_scalar('train/total_loss', total_loss, step)
                 writer.add_scalar('train/KL', kl, step)
                 writer.add_scalar('train/NLL', nll, step)
                 visualize_slots(writer, img_batch, out_dict, step)
-                
+                if training['use_geco']:
+                    writer.add_scalar('train/geco_beta', model.module.geco_beta, step)
+                    writer.add_scalar('train/geco_C_ema', model.module.geco_C_ema, step)
             if step > 0 and step % training['checkpoint_freq'] == 0 and local_rank == 'cuda:0':
                 prefix = training['run_suffix']
                 save_checkpoint(step, model, model_opt, 
