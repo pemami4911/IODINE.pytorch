@@ -8,7 +8,7 @@ We provide a conda environment file. Install dependencies with `conda env create
 ## Data
 
 The official Google Multi-Object Datasets are available as TFRecords here: https://github.com/deepmind/multi_object_datasets.
-This code uses `h5py` versions of this data available here: [TODO] for download.
+This code uses `h5py` versions of this data that I created by modifying the TFRecords, available at this [Dropbox link](https://www.dropbox.com/s/y95oyh3cxl8nk5h/clevr6_with_masks_train.h5?dl=0) for download.
 
 ## Training
 
