@@ -19,6 +19,11 @@ from tqdm import tqdm
 from pathlib import Path
 import shutil
 import pprint
+import os
+
+import numpy as np
+from collections import deque
+import time
 
 @cli_option('-r','--local_rank')
 def local_rank_option(args, run):
@@ -29,6 +34,7 @@ ex = Experiment('TRAINING', ingredients=[ds, net], additional_cli_options=[local
 @ex.config
 def cfg():
     training = {
+            'DDP_port': 29500,
             'batch_size': 16,  # training mini-batch size
             'num_workers': 8,  # pytorch dataloader workers
             'iters': 500000,  # train steps if no curriculum
@@ -86,8 +92,11 @@ def run(training, seed, _run):
     torch.backends.cudnn.benchmark=False
     # Auto-set by sacred 
     #np.random.seed(seed)
-        
-    torch.distributed.init_process_group(backend='nccl', init_method='env://')
+    
+    os.environ['MASTER_ADDR'] = '127.0.0.1'
+    os.environ['MASTER_PORT'] = str(training['DDP_port'])
+    torch.distributed.init_process_group(backend='nccl')
+    
     torch.cuda.set_device(local_rank)
 
     model = IODINE(batch_size=training['batch_size'])
@@ -100,6 +109,8 @@ def run(training, seed, _run):
     model = model.to(local_rank)
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], output_device=local_rank)
     model.train()
+
+    print(f'Model parameters #: {torch.nn.utils.parameters_to_vector(model.parameters()).shape[0]}')
 
     # Optimization
     model_opt = torch.optim.Adam(model.parameters(), lr=training['lr'])
@@ -129,6 +140,9 @@ def run(training, seed, _run):
             num_workers=training['num_workers'], drop_last=True)
     
     max_iters = training['iters']
+    
+    forward_queue = deque(maxlen=10000)
+    backward_queue = deque(maxlen=10000)
 
     while step <= max_iters:
         
@@ -140,15 +154,19 @@ def run(training, seed, _run):
         for batch in data_iter:
             img_batch = batch['imgs'].to(local_rank)
             model_opt.zero_grad()
-
+            
+            start = time.time()
             out_dict = model(img_batch, model_geco, step)
-    
+            forward_queue.append(time.time() - start)
+
             total_loss = out_dict['total_loss']
             kl = out_dict['kl']
             nll = out_dict['nll']
             
+            start = time.time()
             total_loss.backward()
-            
+            backward_queue.append(time.time() - start)
+
             if training['use_scheduler']:
                 scheduler_warmup.step(step)
 
@@ -174,6 +192,10 @@ def run(training, seed, _run):
                 if training['use_geco']:
                     writer.add_scalar('train/geco_beta', model.module.geco_beta, step)
                     writer.add_scalar('train/geco_C_ema', model.module.geco_C_ema, step)
+
+                print('forward time (ms): {}'.format(np.mean(forward_queue) * 1000.))
+                print('backward time (ms): {}'.format(np.mean(backward_queue) * 1000.))
+
             if step > 0 and step % training['checkpoint_freq'] == 0 and local_rank == 'cuda:0':
                 prefix = training['run_suffix']
                 save_checkpoint(step, model, model_opt, 

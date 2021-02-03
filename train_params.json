@@ -4,7 +4,7 @@
       "inference_iters": 5,
       "z_size": 64,
       "input_size": [
-          3, 96, 96
+          3, 128, 128
       ],
       "geco_warm_start": 1000
     },
@@ -12,11 +12,11 @@
       "data_path": "",
       "h5_path": "clevr6_with_masks_train.h5",
       "masks": false,
-      "preprocess_style": "clevr-small"
+      "preprocess_style": "clevr-large"
     },
     "seed": 1,
     "training": {
-      "batch_size": 32,
+      "batch_size": 16,
       "checkpoint": "",
       "checkpoint_freq": 25000,
       "iters": 500000,
