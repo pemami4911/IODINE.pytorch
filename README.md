@@ -1,6 +1,8 @@
 # IODINE.pytorch
 Unofficial PyTorch implementation of IODINE https://arxiv.org/abs/1903.00450
 
+UPDATE: Please see the code for our recent ICML paper on EfficientMORL, a hierarchical VAE that trains/test faster and can use less memory than IODINE https://github.com/pemami4911/EfficientMORL
+
 ## Installation
 
 We provide a conda environment file. Install dependencies with `conda env create -f multi_object.yml`.
